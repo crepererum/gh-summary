@@ -3,7 +3,7 @@ use std::{
     time::Duration,
 };
 
-use anyhow::{bail, Context, Result};
+use anyhow::{bail, Context, Error, Result};
 use chrono::Utc;
 use clap::Parser;
 use octocrab::models::events::payload::{EventPayload, IssuesEventAction};
@@ -92,41 +92,17 @@ async fn main() -> Result<()> {
                 ) {
                     continue;
                 }
-                Topic {
-                    url: evt.issue.html_url.to_string(),
-                    number: evt.issue.number,
-                }
+                Topic::from(evt.issue)
             }
-            EventPayload::IssueCommentEvent(evt) => Topic {
-                url: evt.issue.html_url.to_string(),
-                number: evt.issue.number,
-            },
+            EventPayload::IssueCommentEvent(evt) => Topic::from(evt.issue),
             EventPayload::PullRequestEvent(evt) => {
-                let Some(url) = evt.pull_request.html_url else {
-                    continue;
-                };
-                Topic {
-                    url: url.to_string(),
-                    number: evt.pull_request.number,
-                }
+                Topic::try_from(evt.pull_request).context("convert PR data")?
             }
             EventPayload::PullRequestReviewEvent(evt) => {
-                let Some(url) = evt.pull_request.html_url else {
-                    continue;
-                };
-                Topic {
-                    url: url.to_string(),
-                    number: evt.pull_request.number,
-                }
+                Topic::try_from(evt.pull_request).context("convert PR data")?
             }
             EventPayload::PullRequestReviewCommentEvent(evt) => {
-                let Some(url) = evt.pull_request.html_url else {
-                    continue;
-                };
-                Topic {
-                    url: url.to_string(),
-                    number: evt.pull_request.number,
-                }
+                Topic::try_from(evt.pull_request).context("convert PR data")?
             }
             _ => {
                 continue;
@@ -209,5 +185,25 @@ impl Ord for Topic {
 impl PartialOrd for Topic {
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
         Some(self.cmp(other))
+    }
+}
+
+impl From<octocrab::models::issues::Issue> for Topic {
+    fn from(issue: octocrab::models::issues::Issue) -> Self {
+        Self {
+            url: issue.html_url.to_string(),
+            number: issue.number,
+        }
+    }
+}
+
+impl TryFrom<octocrab::models::pulls::PullRequest> for Topic {
+    type Error = Error;
+
+    fn try_from(pr: octocrab::models::pulls::PullRequest) -> Result<Self, Self::Error> {
+        Ok(Self {
+            url: pr.html_url.context("HTML URL missing")?.to_string(),
+            number: pr.number,
+        })
     }
 }

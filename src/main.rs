@@ -30,6 +30,10 @@ struct Args {
     /// Username.
     #[clap(long)]
     username: String,
+
+    /// User access token.
+    #[clap(long, env = "GITHUB_USER_ACCESS_TOKEN")]
+    user_access_token: Option<String>,
 }
 
 #[tokio::main]
@@ -38,9 +42,15 @@ async fn main() -> Result<()> {
     let args = Args::parse();
     let created_at = Utc::now() - args.event_cutoff;
 
-    let events: Vec<octocrab::models::events::Event> = octocrab::instance()
+    let mut oc_builder = octocrab::Octocrab::builder();
+    if let Some(token) = args.user_access_token {
+        oc_builder = oc_builder.user_access_token(token);
+    }
+    let oc = oc_builder.build().context("create octocrap instance")?;
+
+    let events: Vec<octocrab::models::events::Event> = oc
         .get(
-            format!("/users/{}/events/public", args.username),
+            format!("/users/{}/events", args.username),
             Some(&[("per_page", args.n_events)]),
         )
         .await

@@ -123,9 +123,9 @@ async fn main() -> Result<()> {
 
     for (repo_idx, (repo, topics)) in interactions_by_repo.into_iter().enumerate() {
         let gh_repo: octocrab::models::Repository = octocrab::instance()
-            .get(repo.url, None::<&()>)
+            .get(&repo.url, None::<&()>)
             .await
-            .context("get repo")?;
+            .with_context(|| format!("get repo: {}", repo.url))?;
 
         if repo_idx > 0 {
             print!("; ");

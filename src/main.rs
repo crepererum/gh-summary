@@ -140,7 +140,7 @@ async fn main() -> Result<()> {
             if topic_idx > 0 {
                 print!(", ");
             }
-            print!("[#{}]({})", topic.number, topic.url);
+            print!("{topic}");
         }
     }
     println!();
@@ -195,6 +195,14 @@ impl Ord for Topic {
 impl PartialOrd for Topic {
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
         Some(self.cmp(other))
+    }
+}
+
+impl std::fmt::Display for Topic {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let Self { url, number } = self;
+
+        write!(f, "[#{number}]({url})")
     }
 }
 

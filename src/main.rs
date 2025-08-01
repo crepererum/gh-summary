@@ -180,7 +180,7 @@ struct Topic {
 
 impl PartialEq<Topic> for Topic {
     fn eq(&self, other: &Topic) -> bool {
-        self.url == other.url
+        self.number == other.number
     }
 }
 
@@ -188,7 +188,7 @@ impl Eq for Topic {}
 
 impl Ord for Topic {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        self.url.cmp(&other.url)
+        self.number.cmp(&other.number)
     }
 }
 

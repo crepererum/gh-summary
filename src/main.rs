@@ -1,12 +1,18 @@
 use std::{
     collections::{BTreeMap, BTreeSet},
+    sync::LazyLock,
     time::Duration,
 };
 
 use anyhow::{bail, Context, Error, Result};
 use chrono::Utc;
 use clap::Parser;
-use octocrab::models::events::payload::{EventPayload, IssuesEventAction};
+use octocrab::models::events::payload::{EventPayload, IssuesEventAction, PullRequestEventAction};
+use regex::Regex;
+
+static UNSAFE_CHARS: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r#"[^0-9a-zA-Z /():;.&+-]"#).expect("valid regex"));
+static WHITESPACE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r#"\s+"#).expect("valid regex"));
 
 #[derive(Parser)]
 struct Args {
@@ -64,7 +70,8 @@ async fn main() -> Result<()> {
         );
     }
 
-    let mut interactions_by_repo: BTreeMap<Repo, BTreeSet<Topic>> = Default::default();
+    let mut interactions_by_repo: BTreeMap<Repo, BTreeMap<Topic, BTreeSet<Action>>> =
+        Default::default();
     for event in events {
         if !event.public {
             continue;
@@ -94,7 +101,7 @@ async fn main() -> Result<()> {
         let Some(payload) = payload.specific else {
             continue;
         };
-        let topic = match payload {
+        let (topic, action) = match payload {
             EventPayload::IssuesEvent(evt) => {
                 if !matches!(
                     evt.action,
@@ -102,48 +109,68 @@ async fn main() -> Result<()> {
                 ) {
                     continue;
                 }
-                Topic::from(evt.issue)
+                (Topic::from(evt.issue), Action::Write)
             }
-            EventPayload::IssueCommentEvent(evt) => Topic::from(evt.issue),
+            EventPayload::IssueCommentEvent(evt) => (Topic::from(evt.issue), Action::Comment),
             EventPayload::PullRequestEvent(evt) => {
-                Topic::try_from(evt.pull_request).context("convert PR data")?
+                if !matches!(
+                    evt.action,
+                    PullRequestEventAction::Opened | PullRequestEventAction::Reopened
+                ) {
+                    continue;
+                }
+                (
+                    Topic::try_from(evt.pull_request).context("convert PR data")?,
+                    Action::Code,
+                )
             }
-            EventPayload::PullRequestReviewEvent(evt) => {
-                Topic::try_from(evt.pull_request).context("convert PR data")?
-            }
-            EventPayload::PullRequestReviewCommentEvent(evt) => {
-                Topic::try_from(evt.pull_request).context("convert PR data")?
-            }
+            EventPayload::PullRequestReviewEvent(evt) => (
+                Topic::try_from(evt.pull_request).context("convert PR data")?,
+                Action::Review,
+            ),
+            EventPayload::PullRequestReviewCommentEvent(evt) => (
+                Topic::try_from(evt.pull_request).context("convert PR data")?,
+                Action::Review,
+            ),
             _ => {
                 continue;
             }
         };
-        interactions_by_repo.entry(repo).or_default().insert(topic);
+        interactions_by_repo
+            .entry(repo)
+            .or_default()
+            .entry(topic)
+            .or_default()
+            .insert(action);
     }
 
-    for (repo_idx, (repo, topics)) in interactions_by_repo.into_iter().enumerate() {
+    for (repo, topics) in interactions_by_repo.into_iter() {
         let gh_repo: octocrab::models::Repository = octocrab::instance()
             .get(&repo.url, None::<&()>)
             .await
             .with_context(|| format!("get repo: {}", repo.url))?;
 
-        if repo_idx > 0 {
-            print!("; ");
-        }
         print!(
-            "[{}]({}): ",
+            "- *[{}]({}):*",
             repo.name,
             gh_repo.html_url.context("no html URL for repo")?
         );
 
-        for (topic_idx, topic) in topics.into_iter().enumerate() {
+        for (topic_idx, (topic, actions)) in topics.into_iter().enumerate() {
             if topic_idx > 0 {
-                print!(", ");
+                print!(",");
             }
-            print!("{topic}");
+            // EN space
+            print!("\u{2000}");
+
+            for action in actions.into_iter() {
+                print!("{action}");
+            }
+            print!(" {topic}");
         }
+
+        println!();
     }
-    println!();
 
     Ok(())
 }
@@ -176,6 +203,7 @@ impl PartialOrd for Repo {
 struct Topic {
     url: String,
     number: u64,
+    title: String,
 }
 
 impl PartialEq<Topic> for Topic {
@@ -200,9 +228,12 @@ impl PartialOrd for Topic {
 
 impl std::fmt::Display for Topic {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let Self { url, number } = self;
+        let Self { url, number, title } = self;
 
-        write!(f, "[#{number}]({url})")
+        let title = UNSAFE_CHARS.replace_all(title, "");
+        let title = WHITESPACE.replace_all(&title, " ");
+
+        write!(f, "[#{number}]({url}) (_{title}_)")
     }
 }
 
@@ -211,6 +242,7 @@ impl From<octocrab::models::issues::Issue> for Topic {
         Self {
             url: issue.html_url.to_string(),
             number: issue.number,
+            title: issue.title,
         }
     }
 }
@@ -222,6 +254,32 @@ impl TryFrom<octocrab::models::pulls::PullRequest> for Topic {
         Ok(Self {
             url: pr.html_url.context("HTML URL missing")?.to_string(),
             number: pr.number,
+            title: pr.title.context("PR title missing")?,
         })
+    }
+}
+
+#[derive(PartialEq, Eq, PartialOrd, Ord)]
+enum Action {
+    Code,
+    Write,
+    Review,
+    Comment,
+}
+
+impl Action {
+    fn as_str(&self) -> &'static str {
+        match self {
+            Action::Code => "🔨",
+            Action::Write => "✍️",
+            Action::Review => "🕵️",
+            Action::Comment => "💬",
+        }
+    }
+}
+
+impl std::fmt::Display for Action {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.as_str())
     }
 }

@@ -4,7 +4,7 @@ use std::{
     time::Duration,
 };
 
-use anyhow::{bail, Context, Error, Result};
+use anyhow::{Context, Error, Result, bail};
 use chrono::Utc;
 use clap::Parser;
 use octocrab::models::events::payload::{EventPayload, IssuesEventAction, PullRequestEventAction};

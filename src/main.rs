@@ -24,14 +24,27 @@ struct Args {
     #[clap(long, default_value_t = 1000)]
     n_events: u64,
 
-    /// Orgs.
+    /// Include organizations.
+    ///
+    /// Defaults to "all" if not specified.
     #[clap(
         long,
         required = false,
         num_args=1..,
         value_delimiter = ',',
     )]
-    orgs: Vec<String>,
+    include_orgs: Option<Vec<String>>,
+
+    /// Exclude organizations.
+    ///
+    /// Defaults to "none" if not specified.
+    #[clap(
+            long,
+            required = false,
+            num_args=1..,
+            value_delimiter = ',',
+        )]
+    exclude_orgs: Option<Vec<String>>,
 
     /// Username.
     #[clap(long)]
@@ -77,9 +90,16 @@ async fn main() -> Result<()> {
             continue;
         }
 
-        if !args.orgs.is_empty()
-            && !args
-                .orgs
+        if let Some(include_orgs) = &args.include_orgs
+            && !include_orgs
+                .iter()
+                .any(|org| event.repo.name.starts_with(&format!("{org}/")))
+        {
+            continue;
+        }
+
+        if let Some(exclude_orgs) = &args.exclude_orgs
+            && exclude_orgs
                 .iter()
                 .any(|org| event.repo.name.starts_with(&format!("{org}/")))
         {

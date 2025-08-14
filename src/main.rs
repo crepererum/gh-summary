@@ -52,7 +52,13 @@ struct Args {
     #[clap(long)]
     username: String,
 
+    /// Show private data as well..
+    #[clap(long)]
+    private: bool,
+
     /// User access token.
+    ///
+    /// Must be a fine-grained personal access tokens personal access tokens with account "events" permission.
     #[clap(long, env = "GITHUB_USER_ACCESS_TOKEN")]
     user_access_token: Option<String>,
 }
@@ -88,7 +94,7 @@ async fn main() -> Result<()> {
     let mut interactions_by_repo: BTreeMap<Repo, BTreeMap<Topic, BTreeSet<Action>>> =
         Default::default();
     for event in events {
-        if !event.public {
+        if !args.private && !event.public {
             continue;
         }
 
@@ -114,7 +120,6 @@ async fn main() -> Result<()> {
 
         let repo = Repo {
             name: event.repo.name,
-            url: event.repo.url.to_string(),
         };
 
         let Some(payload) = event.payload else {
@@ -230,16 +235,7 @@ async fn main() -> Result<()> {
     }
 
     for (repo, topics) in interactions_by_repo.into_iter() {
-        let gh_repo: octocrab::models::Repository = octocrab::instance()
-            .get(&repo.url, None::<&()>)
-            .await
-            .with_context(|| format!("get repo: {}", repo.url))?;
-
-        print!(
-            "- *[{}]({}):*",
-            repo.name,
-            gh_repo.html_url.context("no html URL for repo")?
-        );
+        print!("- *{repo}:*");
 
         for (topic_idx, (topic, actions)) in topics.into_iter().enumerate() {
             if topic_idx > 0 {
@@ -263,7 +259,6 @@ async fn main() -> Result<()> {
 #[derive(Debug)]
 struct Repo {
     name: String,
-    url: String,
 }
 
 impl PartialEq<Repo> for Repo {
@@ -283,6 +278,16 @@ impl Ord for Repo {
 impl PartialOrd for Repo {
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
         Some(self.cmp(other))
+    }
+}
+
+impl std::fmt::Display for Repo {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let Self { name } = self;
+        // technically we should use the GitHub API to get the HTML URL of the repo, but that requires per-repo
+        // permissions and is a mess with the current fine-grained access tokens.
+        let html_url = format!("https://github.com/{}", name);
+        write!(f, "[{}]({})", name, html_url)
     }
 }
 

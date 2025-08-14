@@ -195,6 +195,7 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
+#[derive(Debug)]
 struct Repo {
     name: String,
     url: String,
@@ -220,6 +221,7 @@ impl PartialOrd for Repo {
     }
 }
 
+#[derive(Debug)]
 struct Topic {
     url: String,
     number: u64,
@@ -279,7 +281,7 @@ impl TryFrom<octocrab::models::pulls::PullRequest> for Topic {
     }
 }
 
-#[derive(PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
 enum Action {
     Code,
     Write,

@@ -12,10 +12,6 @@ use octocrab::models::events::payload::{
 };
 use regex::Regex;
 
-use crate::auth::get_oauth;
-
-mod auth;
-
 static UNSAFE_CHARS: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r#"[^0-9a-zA-Z /():;.&+-]"#).expect("valid regex"));
 static WHITESPACE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r#"\s+"#).expect("valid regex"));
@@ -55,6 +51,10 @@ struct Args {
     /// Username.
     #[clap(long)]
     username: String,
+
+    /// User access token.
+    #[clap(long, env = "GITHUB_USER_ACCESS_TOKEN")]
+    user_access_token: Option<String>,
 }
 
 #[tokio::main]
@@ -63,11 +63,11 @@ async fn main() -> Result<()> {
     let args = Args::parse();
     let created_at = Utc::now() - args.event_cutoff;
 
-    let oauth = get_oauth().await.context("oauth")?;
-    let oc = octocrab::Octocrab::builder()
-        .oauth(oauth)
-        .build()
-        .context("create octocrap instance")?;
+    let mut oc_builder = octocrab::Octocrab::builder();
+    if let Some(token) = args.user_access_token {
+        oc_builder = oc_builder.user_access_token(token);
+    }
+    let oc = oc_builder.build().context("create octocrap instance")?;
 
     let events: Vec<octocrab::models::events::Event> = oc
         .get(

@@ -7,7 +7,9 @@ use std::{
 use anyhow::{Context, Error, Result, bail};
 use chrono::Utc;
 use clap::Parser;
-use octocrab::models::events::payload::{EventPayload, IssuesEventAction, PullRequestEventAction};
+use octocrab::models::events::payload::{
+    EventPayload, IssueCommentEventAction, IssuesEventAction, PullRequestEventAction,
+};
 use regex::Regex;
 
 static UNSAFE_CHARS: LazyLock<Regex> =
@@ -121,28 +123,91 @@ async fn main() -> Result<()> {
         let Some(payload) = payload.specific else {
             continue;
         };
-        let (topic, action) = match payload {
+        let (topic, action) = match payload.clone() {
             EventPayload::IssuesEvent(evt) => {
-                if !matches!(
-                    evt.action,
-                    IssuesEventAction::Opened | IssuesEventAction::Reopened
-                ) {
-                    continue;
-                }
-                (Topic::from(evt.issue), Action::Write)
+                let action = match evt.action {
+                    IssuesEventAction::Opened => Action::Write,
+                    IssuesEventAction::Closed
+                    | IssuesEventAction::Reopened
+                    | IssuesEventAction::Assigned
+                    | IssuesEventAction::Unassigned
+                    | IssuesEventAction::Labeled
+                    | IssuesEventAction::Unlabeled => Action::Assist,
+                    IssuesEventAction::Edited => {
+                        if evt.issue.user.login == args.username {
+                            // edit own issue
+                            Action::Comment
+                        } else {
+                            // edit other's issue
+                            Action::Assist
+                        }
+                    }
+                    _ => {
+                        continue;
+                    }
+                };
+
+                let topic = Topic::from(evt.issue);
+
+                (topic, action)
             }
-            EventPayload::IssueCommentEvent(evt) => (Topic::from(evt.issue), Action::Comment),
+            EventPayload::IssueCommentEvent(evt) => {
+                let action = match evt.action {
+                    IssueCommentEventAction::Created => Action::Comment,
+                    IssueCommentEventAction::Edited => {
+                        if evt.comment.user.login == args.username {
+                            // edit own comment
+                            Action::Comment
+                        } else {
+                            // edit other's comment
+                            Action::Assist
+                        }
+                    }
+                    IssueCommentEventAction::Deleted => Action::Assist,
+                    _ => {
+                        continue;
+                    }
+                };
+
+                let topic = Topic::from(evt.issue);
+
+                (topic, action)
+            }
             EventPayload::PullRequestEvent(evt) => {
-                if !matches!(
-                    evt.action,
-                    PullRequestEventAction::Opened | PullRequestEventAction::Reopened
-                ) {
-                    continue;
-                }
-                (
-                    Topic::try_from(evt.pull_request).context("convert PR data")?,
-                    Action::Code,
-                )
+                let action = match evt.action {
+                    PullRequestEventAction::Opened => Action::Code,
+                    PullRequestEventAction::Closed
+                    | PullRequestEventAction::Reopened
+                    | PullRequestEventAction::Assigned
+                    | PullRequestEventAction::Unassigned
+                    | PullRequestEventAction::ReviewRequested
+                    | PullRequestEventAction::ReviewRequestRemoved
+                    | PullRequestEventAction::Labeled
+                    | PullRequestEventAction::Unlabeled
+                    | PullRequestEventAction::Synchronize => Action::Assist,
+                    PullRequestEventAction::Edited => {
+                        if evt
+                            .pull_request
+                            .user
+                            .as_ref()
+                            .map(|user| user.login == args.username)
+                            .unwrap_or_default()
+                        {
+                            // edit own PR
+                            Action::Comment
+                        } else {
+                            // edit other user's PR
+                            Action::Assist
+                        }
+                    }
+                    _ => {
+                        continue;
+                    }
+                };
+
+                let topic = Topic::try_from(evt.pull_request).context("convert PR data")?;
+
+                (topic, action)
             }
             EventPayload::PullRequestReviewEvent(evt) => (
                 Topic::try_from(evt.pull_request).context("convert PR data")?,
@@ -287,6 +352,7 @@ enum Action {
     Write,
     Review,
     Comment,
+    Assist,
 }
 
 impl Action {
@@ -296,6 +362,7 @@ impl Action {
             Action::Write => "✍️",
             Action::Review => "🕵️",
             Action::Comment => "💬",
+            Action::Assist => "⚙️",
         }
     }
 }

@@ -52,7 +52,7 @@ struct Args {
     #[clap(long)]
     username: String,
 
-    /// Show private data as well..
+    /// Show private data as well.
     #[clap(long)]
     private: bool,
 

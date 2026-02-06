@@ -65,7 +65,14 @@ struct Args {
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    dotenvy::dotenv_override().ok();
+    match dotenvy::dotenv_override() {
+        Ok(_) => {}
+        Err(e) if e.not_found() => {}
+        Err(e) => {
+            return Err(e).context("load dotenv file");
+        }
+    }
+
     let args = Args::parse();
     let created_at = Utc::now() - args.event_cutoff;
 
